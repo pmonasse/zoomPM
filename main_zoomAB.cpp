@@ -6,35 +6,40 @@
 
 const float sqrt2=M_SQRT1_2;
 const float sqrt22=sqrt2/2;
-const float minGrad=0.001f; // Minimum gradient norm for applying anisotropy
-const float dt = 0.1f; // Time step for diffusion
+const float minGrad=0.001f; ///< Minimum gradient norm for applying anisotropy
+const float dt = 0.1f; ///< Time step for diffusion
 
-/// Replace each block of iSizeZoom x iSizeZoom pixels in pfZoom by its average.
-/// Write the result in moyenne.
-void projectionPU(const float *pfZoom, int w, int h, int iSizeZoom,
-                  float *temp, float *moyenne) {
+/// Compute the 0-order spline interpolation of the input image
+void zoom_duplication(const float* in, int w, int h, int z, float* out) {
+    const int zw=z*w;
+    for (int j=0; j<h; j++) {
+        const float* line=out;
+        for(int i=0; i<w; i++, in++)
+            for(int k=0; k<z; k++)
+                *out++ = *in;
+        for(int k=1; k<z; k++, out+=zw) // Duplicate z-1 times each line
+            memcpy(out, line, zw*sizeof(float));
+    }
+}
+
+/// Replace each block of \a z x \a z pixels in \a in by its average.
+/// Write the result in \a average.
+void projectionPU(const float*  in, int w, int h, int z,
+                  float* temp, float* average) {
+    float norm = 1.0f/float(z*z);
     for(int j=0; j<h; j++)
         for(int i=0; i<w; i++) {
             int offset = w*j+i;
             float s=0.0;
-            for(int x=i*iSizeZoom; x<(i+1)*iSizeZoom; x++)
-                for(int y=j*iSizeZoom; y<(j+1)*iSizeZoom; y++) {
-                    int Zoffset = iSizeZoom*w*y+x;
-                    s += pfZoom[Zoffset];
+            for(int y=j*z; y<(j+1)*z; y++)
+                for(int x=i*z; x<(i+1)*z; x++){
+                    int Zoffset = z*w*y+x;
+                    s += in[Zoffset];
                 }
-            s /= (float)(iSizeZoom*iSizeZoom);
+            s *= norm;
             temp[offset]=s;
         }
-
-    for(int j=0; j<h; j++)
-        for(int i=0; i<w; i++) {
-            int offset = w*j+i;
-            for(int x=i*iSizeZoom; x<(i+1)*iSizeZoom; x++)
-                for(int y=j*iSizeZoom; y<(j+1)*iSizeZoom; y++) {
-                    int Zoffset = (iSizeZoom*w*y)+x;
-                    moyenne[Zoffset]= temp[offset];
-                }
-        }
+    zoom_duplication(temp,w,h, z, average);
 }
 
 void derivatives(const float a0[3], const float a1[3], const float a2[3],
@@ -141,61 +146,54 @@ void compute_derivatives(const float *im, int w, int dy,
     }
 }
 
-void zoomAB(const float* pfImage, int w, int h, float* pfZoom, int iSizeZoom) {
-    const int zw=iSizeZoom*w, zh=iSizeZoom*h;
+/// Zoom of low-res image \a lr into high-res image \a hr.
+void zoomAB(const float* lr, int w, int h, int z, float* hr) {
+    const int zw=z*w, zh=z*h;
     const int iSizeImageZoom = zw*zh;
-    float *pfImagetemp = new float[w*h];
-    float *pfImageDup = new float[iSizeImageZoom];
-    float *pfuxixi =    new float[iSizeImageZoom];
-    float *pfunn   =    new float[iSizeImageZoom];
-    float *pfgrad  =    new float[iSizeImageZoom];
-    float *pfmoyenne  = new float[iSizeImageZoom];
+    float* temp = new float[w*h];
+    float* dup     = new float[iSizeImageZoom];
+    float* grad    = new float[iSizeImageZoom];
+    float* uxixi   = new float[iSizeImageZoom];
+    float* unn     = new float[iSizeImageZoom];
+    float* average = new float[iSizeImageZoom];
 
-	const int n_iter = int(iSizeZoom*iSizeZoom/::dt+0.5f);
-
+    const int n_iter = int(z*z/::dt+0.5f);
     std::cout << "Iterations: " << n_iter << std::endl;
-	// Ici Dupliquer pfImage vers pfImageDup
-	for (int i=0;i<w;i++)
-		for (int j=0;j<h;j++) {
-            int offset = w*j+i;
-            for (int x=i*iSizeZoom; x<(i+1)*iSizeZoom; x++)
-                for (int y=j*iSizeZoom; y<(j+1)*iSizeZoom; y++) {
-                    int Zoffset = (zw*y)+x;
-                    pfImageDup[Zoffset]= pfImage[offset];
-                }
-        }
-	// copier pfImageDup vers pfZoom
-    memcpy(pfZoom, pfImageDup, iSizeImageZoom * sizeof(float));
+
+    // Generate dup, the 0-order spline interpolation of the input image
+    zoom_duplication(lr,w,h, z, dup);
+    // Copy it as initial zoomed image hr
+    memcpy(hr, dup, iSizeImageZoom*sizeof(float));
 
     for(int k=0; k<n_iter; k++) {
         std::cout << k << ' ' << std::flush;
-        compute_derivatives(pfZoom,zw,zh, pfgrad, pfuxixi, pfunn);
-        projectionPU(pfZoom,w,h, iSizeZoom, pfImagetemp, pfmoyenne);
+        compute_derivatives(hr,zw,zh, grad, uxixi, unn);
+        projectionPU(hr,w,h, z, temp, average);
 
-		const float* uxi=pfuxixi;
-        const float* un=pfunn;
-        const float* grd=pfgrad;
-        const float* moy= pfmoyenne;
-        const float* uo = pfImageDup; 
-		float* imz=pfZoom;
+        const float* grd=grad;
+        const float* uxi=uxixi;
+        const float* un=unn;
+        const float* avg=average;
+        const float* uo=dup;
+        float* imz=hr;
         for(int i=0; i<iSizeImageZoom; i++, imz++) {
-            float reac = *moy++ - *uo++;
+            float reac = *avg++ - *uo++;
             float evolx = *uxi++;
             float evoln = *un++ / (1.0f + 0.01f * *grd++);
             *imz += ::dt*(evolx + evoln - reac);
             if(*imz > 255.0)
-				*imz = 255;
+                *imz = 255;
             else if(*imz <0.0)
                 *imz = 0;
         }
     }
     std::cout << std::endl;
-    delete [] pfImagetemp;
-    delete [] pfImageDup;
-    delete [] pfuxixi;
-    delete [] pfunn;
-    delete [] pfgrad;
-    delete [] pfmoyenne;
+    delete [] temp;
+    delete [] dup;
+    delete [] uxixi;
+    delete [] unn;
+    delete [] grad;
+    delete [] average;
 }
 
 int main(int argc, char* argv[]) {
@@ -227,7 +225,7 @@ int main(int argc, char* argv[]) {
     }
 
     float* out = new float[1*z*z*w*h];
-    zoomAB(data, (int)w, (int)h, out, (int)z);
+    zoomAB(data, (int)w, (int)h, (int)z, out);
     if(io_png_write_f32(argv[2], out, z*w, z*h, 1) != 0) {
         std::cerr << "Error writing image file " << argv[2] << std::endl;
         return 1;
