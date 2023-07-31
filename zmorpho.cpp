@@ -138,6 +138,9 @@ int main(int argc, char** argv) {
     timer.tick();
     float scale = zoom*.5f;
     LLTree* lltree = convert(tree,zoom);
+#ifdef _OPENMP
+#pragma omp parallel for
+#endif
     for(int i=0; i<tree.iNbShapes; i++) {
         std::vector<Point>& line = lltree->nodes()[i].ll->line;
         std::vector<DPoint> dline;
