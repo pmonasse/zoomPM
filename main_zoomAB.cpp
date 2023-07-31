@@ -3,6 +3,19 @@
 #include <iostream>
 #include <cmath>
 #include <cstring>
+#include "xmtime.h"
+
+/// Timer class to measure real time (not CPU time)
+class Timer {
+    unsigned long t; ///< Current time in milliseconds
+public:
+    Timer() { tick(); } ///< Constructor
+    unsigned long tick() { return t=xmtime(); } ///< Reset time
+    void time() { ///< Display elapsed time and reset current time
+        unsigned long told = t;
+        std::cout << "Time = " << (tick()-told)/1000.0f << "s" << std::endl;
+    }
+};
 
 const float sqrt2=M_SQRT1_2;
 const float sqrt22=sqrt2/2;
@@ -79,18 +92,21 @@ void derivatives(const float a0[3], const float a1[3], const float a2[3],
 void compute_derivatives(const float *im, int w, int dy,
                          float *grad, float *evolxixi, float *evolnn) {
     // Inside
-    const float *a0=im, *a1=a0+w, *a2=a1+w;     
-    float *gg=grad+w+1, *g=evolxixi+w+1, *h=evolnn+w+1;
-    for(int j=1; j+1<dy; j++){
-        for(int i=1; i+1<w; i++){
+    const int jmax = dy-1;
+#ifdef _OPENMP
+#pragma omp for
+#endif
+    for(int j=1; j<jmax; j++) {
+        const float *a0=im+(j-1)*w, *a1=a0+w, *a2=a1+w;     
+        float *gg=grad+j*w+1, *g=evolxixi+j*w+1, *h=evolnn+j*w+1;
+        for(int i=1; i+1<w; i++) {
             derivatives(a0,a1,a2, *gg, *g, *h);
             a0++; a1++; a2++; gg++; g++; h++;
         }
-        a0+=2; a1+=2; a2+=2; gg+=2; g+=2; h+=2;
     }
     // Top boundary
-    a0=im; a1=im+w;
-    gg=grad; g=evolxixi; h=evolnn;
+    const float *a0=im, *a1=im+w;
+    float *gg=grad, *g=evolxixi, *h=evolnn;
     for(int k=1; k+1<w; k++) {
         derivatives(a0, a0, a1, gg[k], g[k], h[k]);
         a0++; a1++;
@@ -158,15 +174,19 @@ void zoomAB(const float* lr, int w, int h, int z, float* hr) {
     float* average = new float[iSizeImageZoom];
 
     const int n_iter = int(z*z/::dt+0.5f);
-    std::cout << "Iterations: " << n_iter << std::endl;
+    std::cout << "Iterations: " << n_iter << ". " << std::flush;
+    
 
     // Generate dup, the 0-order spline interpolation of the input image
     zoom_duplication(lr,w,h, z, dup);
     // Copy it as initial zoomed image hr
     memcpy(hr, dup, iSizeImageZoom*sizeof(float));
 
+#ifdef _OPENMP
+#pragma omp parallel
+#endif
+
     for(int k=0; k<n_iter; k++) {
-        std::cout << k << ' ' << std::flush;
         compute_derivatives(hr,zw,zh, grad, uxixi, unn);
         projectionPU(hr,w,h, z, temp, average);
 
@@ -175,19 +195,20 @@ void zoomAB(const float* lr, int w, int h, int z, float* hr) {
         const float* un=unn;
         const float* avg=average;
         const float* uo=dup;
-        float* imz=hr;
-        for(int i=0; i<iSizeImageZoom; i++, imz++) {
-            float reac = *avg++ - *uo++;
-            float evolx = *uxi++;
-            float evoln = *un++ / (1.0f + 0.01f * *grd++);
-            *imz += ::dt*(evolx + evoln - reac);
-            if(*imz > 255.0)
-                *imz = 255;
-            else if(*imz <0.0)
-                *imz = 0;
+#ifdef _OPENMP
+#pragma omp for
+#endif
+        for(int i=0; i<iSizeImageZoom; i++) {
+            float reac = average[i] - dup[i];
+            float evolx = uxixi[i];
+            float evoln = unn[i] / (1.0f + 0.01f * grad[i]);
+            hr[i] += ::dt*(evolx + evoln - reac);
+            if(hr[i] > 255.0)
+                hr[i] = 255;
+            else if(hr[i] <0.0)
+                hr[i] = 0;
         }
     }
-    std::cout << std::endl;
     delete [] temp;
     delete [] dup;
     delete [] uxixi;
@@ -224,8 +245,10 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
+    Timer T;
     float* out = new float[1*z*z*w*h];
     zoomAB(data, (int)w, (int)h, (int)z, out);
+    T.time();
     if(io_png_write_f32(argv[2], out, z*w, z*h, 1) != 0) {
         std::cerr << "Error writing image file " << argv[2] << std::endl;
         return 1;

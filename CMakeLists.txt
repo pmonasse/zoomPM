@@ -7,7 +7,7 @@ include_directories(${PNG_INCLUDE_DIRS})
 
 find_package(OpenMP)
 
-add_executable(zoomAB main_zoomAB.cpp cmdLine.h io_png.c io_png.h)
+add_executable(zoomAB main_zoomAB.cpp cmdLine.h io_png.c io_png.h xmtime.h)
 target_link_libraries(zoomAB ${PNG_LIBRARIES})
 
 add_executable(zmorpho zmorpho.cpp cmdLine.h xmtime.h io_png.c io_png.h
@@ -16,6 +16,8 @@ add_executable(zmorpho zmorpho.cpp cmdLine.h xmtime.h io_png.c io_png.h
 
 target_compile_definitions(zmorpho PUBLIC BOUNDARY)
 target_link_libraries(zmorpho ${PNG_LIBRARIES})
+
 if(OpenMP_CXX_FOUND)
+  target_link_libraries(zoomAB OpenMP::OpenMP_CXX)
   target_link_libraries(zmorpho OpenMP::OpenMP_CXX)
 endif()
