@@ -28,7 +28,6 @@
 #include "io_png.h"
 #include "cmdLine.h"
 #include "xmtime.h"
-#include <algorithm>
 
 /// Timer class to measure real time (not CPU time)
 class Timer {
