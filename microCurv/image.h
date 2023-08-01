@@ -30,7 +30,7 @@ struct Rect {
 std::istream& operator>>(std::istream& str, Rect& R);
 inline std::ostream& operator<<(std::ostream& str, const Rect&) { return str; }
 
-unsigned char* extract(unsigned char* inImage, size_t w, size_t h, Rect R);
+unsigned char* extract(const unsigned char* im, size_t w, size_t h, Rect R);
 void fill_border(unsigned char* im, size_t w, size_t h, unsigned char v=0);
 
 /// Crop rectangle \a r from image \a in having \a ch channels.

@@ -103,7 +103,7 @@ static void mirrorV(unsigned char* in, size_t w, size_t h, int m, int dir) {
 /// Extract a (possibly too large) rectangle \a R from an image.
 /// Missing pixels are filled in by mirror and periodicity.
 /// Return a newly allocated array, remember to \c delete[] it.
-unsigned char* extract(unsigned char* inImage, size_t w, size_t h, Rect R) {
+unsigned char* extract(const unsigned char* im, size_t w, size_t h, Rect R) {
     unsigned char* outImage = new unsigned char[R.w*R.h];
     std::fill(outImage, outImage+(R.w*R.h), 0);
     Rect R0 = {0,0,(int)w,(int)h};
@@ -111,7 +111,7 @@ unsigned char* extract(unsigned char* inImage, size_t w, size_t h, Rect R) {
 
     // Copy original image in center
     for(int i=R1.y; i<R1.y+R1.h; i++)
-        std::copy(inImage+i*w+R1.x, inImage+i*w+R1.x+R1.w,
+        std::copy(im+i*w+R1.x, im+i*w+R1.x+R1.w,
                   outImage+(i-R.y)*R.w+R1.x-R.x);
 
     // Horizontal mirror
