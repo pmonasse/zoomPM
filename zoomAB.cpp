@@ -40,6 +40,18 @@ public:
     }
 };
 
+/// Test whether the 3-channel image \a data is actually gray-scale.
+bool all_gray(const float* data, int w, int h) {
+    int n=w*h;
+    for(int i=1; i<3; i++) {
+        const float *p=data, *q=p+i*n;
+        for(int j=0; j<n; j++)
+            if(*p++ != *q++)
+                return false;
+    }
+    return true;
+}
+
 const float sqrt2=M_SQRT1_2;
 const float sqrt22=sqrt2/2;
 const float minGrad=0.001f; ///< Minimum gradient norm for applying anisotropy
@@ -117,7 +129,7 @@ void compute_derivatives(const float *im, int w, int dy,
     // Inside
     const int jmax = dy-1;
 #ifdef _OPENMP
-#pragma omp for
+#pragma omp parallel for
 #endif
     for(int j=1; j<jmax; j++) {
         const float *a0=im+(j-1)*w, *a1=a0+w, *a2=a1+w;     
@@ -197,17 +209,13 @@ void zoomAB(const float* lr, int w, int h, int z, float* hr) {
     float* average = new float[iSizeImageZoom];
 
     const int n_iter = int(z*z/::dt+0.5f);
-    std::cout << "Iterations: " << n_iter << ". " << std::flush;
+    std::cout << "Iterations: " << n_iter << "." << std::endl;
     
 
     // Generate dup, the 0-order spline interpolation of the input image
     zoom_duplication(lr,w,h, z, dup);
     // Copy it as initial zoomed image hr
     memcpy(hr, dup, iSizeImageZoom*sizeof(float));
-
-#ifdef _OPENMP
-#pragma omp parallel
-#endif
 
     for(int k=0; k<n_iter; k++) {
         compute_derivatives(hr,zw,zh, grad, uxixi, unn);
@@ -219,7 +227,7 @@ void zoomAB(const float* lr, int w, int h, int z, float* hr) {
         const float* avg=average;
         const float* uo=dup;
 #ifdef _OPENMP
-#pragma omp for
+#pragma omp parallel for
 #endif
         for(int i=0; i<iSizeImageZoom; i++) {
             float reac = average[i] - dup[i];
@@ -242,8 +250,10 @@ void zoomAB(const float* lr, int w, int h, int z, float* hr) {
 
 int main(int argc, char* argv[]) {
     CmdLine cmd;
+    bool bColor=false;
     unsigned int z=2; // Max number of pixels to discard
     cmd.add( make_option('z',z).doc("Integer zoom factor") );
+    cmd.add( make_option('c',bColor,"color").doc("Handle color image") );
 
     try {
         cmd.process(argc, argv);
@@ -261,18 +271,30 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    size_t w, h;
-    float* data = io_png_read_f32_gray(argv[1], &w, &h);
+    size_t w, h, channels=1;
+    float* data;
+    if(bColor) {
+        data = io_png_read_f32_rgb(argv[1], &w, &h);
+        if(all_gray(data,w,h))
+            std::cout << "Image is grayscale: process one channel" << std::endl;
+        else
+            channels=3;
+    } else
+        data = io_png_read_f32_gray(argv[1], &w, &h);
     if(! data) {
         std::cerr << "Error loading image " << argv[1] << std::endl;
         return 1;
     }
 
+    float* out = new float[channels*z*z*w*h];
     Timer T;
-    float* out = new float[1*z*z*w*h];
-    zoomAB(data, (int)w, (int)h, (int)z, out);
+    for(int i=0; i<channels; i++) {
+        if(channels>1)
+            std::cout << "Channel " << i << ". " << std::flush;
+        zoomAB(data+w*h*i, (int)w, (int)h, (int)z, out+z*z*w*h*i);
+    }
     T.time();
-    if(io_png_write_f32(argv[2], out, z*w, z*h, 1) != 0) {
+    if(io_png_write_f32(argv[2], out, z*w, z*h, channels) != 0) {
         std::cerr << "Error writing image file " << argv[2] << std::endl;
         return 1;
     }
