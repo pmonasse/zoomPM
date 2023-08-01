@@ -28,6 +28,7 @@
 #include "io_png.h"
 #include "cmdLine.h"
 #include "xmtime.h"
+#include <cstring>
 
 /// Timer class to measure real time (not CPU time)
 class Timer {
@@ -40,6 +41,18 @@ public:
         std::cout << "Time = " << (tick()-told)/1000.0f << "s" << std::endl;
     }
 };
+
+/// Test whether the 3-channel image \a data is actually gray-scale.
+bool all_gray(const unsigned char* data, int w, int h) {
+    int n=w*h;
+    for(int i=1; i<3; i++) {
+        const unsigned char *p=data, *q=p+i*n;
+        for(int j=0; j<n; j++)
+            if(*p++ != *q++)
+                return false;
+    }
+    return true;
+}
 
 /// The image is enlarged by this number of pixels on each side before
 /// extraction of level lines, in order to reduce border effects.
@@ -83,12 +96,64 @@ unsigned char* reconstruct(LLTree& tree, int w, int h, const Rect& R) {
     return out;
 }
 
+unsigned char* zoom_channel(const unsigned char* inIm, int w, int h, int z) {
+    Timer T;
+
+    Rect rectSelect= {0,0,(int)w,(int)h};
+    const Rect R={int(z*MARGIN), int(z*MARGIN),
+                  int(z*rectSelect.w), int(z*rectSelect.h)}; // Image ROI
+    rectSelect.x -= MARGIN;
+    rectSelect.y -= MARGIN;
+    rectSelect.w += 2*MARGIN;
+    rectSelect.h += 2*MARGIN;
+
+    unsigned char* inImage = extract(inIm,w,h, rectSelect);
+
+    std::cout << "Tree extraction. " << std::flush;
+    T.tick();
+    LsTree tree(inImage, rectSelect.w, rectSelect.h);
+    std::cout << "Shapes: " << tree.iNbShapes << ". " << std::flush;
+    T.time();
+    delete [] inImage;
+
+    std::cout << "Level lines smoothing. " << std::flush;
+    T.tick();
+    float scale = z*.5f;
+    LLTree* lltree = convert(tree,z);
+#ifdef _OPENMP
+#pragma omp parallel for
+#endif
+    for(int i=0; i<tree.iNbShapes; i++) {
+        std::vector<Point>& line = lltree->nodes()[i].ll->line;
+        std::vector<DPoint> dline;
+        for(std::vector<Point>::iterator it=line.begin(); it!=line.end(); ++it)
+            dline.push_back( DPoint((double)it->x,(double)it->y) );
+        assert(dline.front()==dline.back());
+        gass(dline, 0.0, scale);
+        line.clear();
+        for(std::vector<DPoint>::iterator it=dline.begin();it!=dline.end();++it)
+            line.push_back( Point((float)it->x,(float)it->y) );
+    }
+    T.time();
+
+    std::cout << "Image reconstruction. " << std::flush;
+    T.tick();
+    inImage = reconstruct(*lltree, z*rectSelect.w, z*rectSelect.h, R);
+    T.time();
+
+    delete [] lltree->root()->ll;
+    delete lltree;
+    return inImage;
+}
+
 /// Main procedure for curvature microscope.
 int main(int argc, char** argv) {
     unsigned int zoom=2;
+    bool bColor=false;
     std::string inLL, outLL, sOutImage;
     CmdLine cmd; cmd.prefixDoc = "\t";
     cmd.add( make_option('z',zoom).doc("Integer zoom factor") );
+    cmd.add( make_option('c',bColor,"color").doc("Handle color image") );
 
     try {
         cmd.process(argc, argv);
@@ -106,65 +171,48 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    size_t w, h;
-    unsigned char* inIm = io_png_read_u8_gray(argv[1], &w, &h);
+    size_t w, h, channels=1;
+    unsigned char* inIm;
+    if(bColor) {
+        inIm = io_png_read_u8_rgb(argv[1], &w, &h);
+        if(all_gray(inIm,w,h))
+            std::cout << "Image is grayscale: process one channel" << std::endl;
+        else
+            channels=3;
+    } else
+        inIm = io_png_read_u8_gray(argv[1], &w, &h);
     if(! inIm) {
         std::cerr << "Error reading as PNG image: " << argv[1] << std::endl;
         return 1;
     }
 
-    Timer timer;
-
-    Rect rectSelect= {0,0,(int)w,(int)h};
-    const Rect R={int(zoom*MARGIN), int(zoom*MARGIN),
-                  int(zoom*rectSelect.w), int(zoom*rectSelect.h)}; // Image ROI
-    rectSelect.x -= MARGIN;
-    rectSelect.y -= MARGIN;
-    rectSelect.w += 2*MARGIN;
-    rectSelect.h += 2*MARGIN;
-
-    unsigned char* inImage = extract(inIm,w,h, rectSelect);
-    free(inIm);
-
-    std::cout << "Tree extraction. " << std::flush;
-    timer.tick();
-    LsTree tree(inImage, rectSelect.w, rectSelect.h);
-    std::cout << "Shapes: " << tree.iNbShapes << ". " << std::flush;
-    timer.time();
-    delete [] inImage;
-
-    std::cout << "Level lines smoothing. " << std::flush;
-    timer.tick();
-    float scale = zoom*.5f;
-    LLTree* lltree = convert(tree,zoom);
-#ifdef _OPENMP
-#pragma omp parallel for
-#endif
-    for(int i=0; i<tree.iNbShapes; i++) {
-        std::vector<Point>& line = lltree->nodes()[i].ll->line;
-        std::vector<DPoint> dline;
-        for(std::vector<Point>::iterator it=line.begin(); it!=line.end(); ++it)
-            dline.push_back( DPoint((double)it->x,(double)it->y) );
-        assert(dline.front()==dline.back());
-        gass(dline, 0.0, scale);
-        line.clear();
-        for(std::vector<DPoint>::iterator it=dline.begin(); it!=dline.end(); ++it)
-            line.push_back( Point((float)it->x,(float)it->y) );
+    unsigned char* out[3];
+    for(int i=0; i<channels; i++) {
+        if(channels>1)
+            std::cout << "*Processing channel " << i << "*" << std::endl;
+        out[i] = zoom_channel(inIm+i*w*h, w, h, zoom);
     }
-    timer.time();
 
-    std::cout << "Image reconstruction. " << std::flush;
-    timer.tick();
-    inImage = reconstruct(*lltree, zoom*rectSelect.w, zoom*rectSelect.h, R);
-    if(io_png_write_u8(argv[2], inImage, R.w, R.h, 1)!=0) {
+    bool ok=true;
+    if(channels==1)
+        ok = (io_png_write_u8(argv[2], out[0], zoom*w, zoom*h, 1)==0);
+    else {
+        int sz = zoom*w*zoom*h;
+        unsigned char* outImage = new unsigned char[sz*channels];
+        for(int i=0; i<channels; i++)
+            memcpy(outImage+sz*i, out[i], sz*sizeof(unsigned char));
+        ok = (io_png_write_u8(argv[2], outImage, zoom*w, zoom*h, channels)==0);
+        delete [] outImage;
+    }
+    for(int i=0; i<channels; i++)
+        delete [] out[i];
+
+    if(! ok) {
         std::cerr << "Error writing image file " << sOutImage << std::endl;
         return 1;
     }
-    delete [] inImage;
-    timer.time();
-
-    delete [] lltree->root()->ll;
-    delete lltree;
+    
+    free(inIm);
 
     return 0;
 }
