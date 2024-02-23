@@ -221,11 +221,6 @@ void zoomAB(const float* lr, int w, int h, int z, float* hr) {
         compute_derivatives(hr,zw,zh, grad, uxixi, unn);
         projectionPU(hr,w,h, z, temp, average);
 
-        const float* grd=grad;
-        const float* uxi=uxixi;
-        const float* un=unn;
-        const float* avg=average;
-        const float* uo=dup;
 #ifdef _OPENMP
 #pragma omp parallel for
 #endif
