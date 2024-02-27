@@ -52,8 +52,6 @@ bool all_gray(const float* data, int w, int h) {
     return true;
 }
 
-const float sqrt2=M_SQRT1_2;
-const float sqrt22=sqrt2/2;
 const float minGrad=0.001f; ///< Minimum gradient norm for applying anisotropy
 const float dt = 0.1f; ///< Time step for diffusion
 
@@ -111,17 +109,19 @@ void projectionPU(const float*  in, int w, int h, int z,
 
 void derivatives(const float a0[3], const float a1[3], const float a2[3],
                  float& grad, float& g, float& h) {
-    static const float c2=0.707106781186547129*4.0+4.0;
+    const float sqrt12=M_SQRT1_2; // 1/sqrt(2)
+    const float sqrt18=sqrt12/2;  // 1/sqrt(8)=1/(2 sqrt(2))
+    const float c2=4.0*sqrt12+4.0;
     float c= a2[2] - a0[0];
     float d= a2[0] - a0[2];
-    float ax= a1[2] - a1[0] + sqrt22*(c-d);
-    float ay= a2[1] - a0[1] + sqrt22*(c+d);
+    float ax= a1[2] - a1[0] + sqrt18*(c-d);
+    float ay= a2[1] - a0[1] + sqrt18*(c+d);
     float az=ax*ay;
     ax *= ax;
     ay *= ay;
     grad = ax+ay;
     if(grad < ::minGrad) {
-        h = g = ((a0[0]+a0[2]+a2[0]+a2[2])*sqrt2 +
+        h = g = ((a0[0]+a0[2]+a2[0]+a2[2])*sqrt12 +
                  (a0[1]+a1[0]+a1[2]+a2[1]) - c2*a1[1])/c2;
         return;
     }
