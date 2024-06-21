@@ -88,7 +88,7 @@ void fill_padding(float* in, int zw, int zh) {
 
 /// Replace each block of \a z x \a z pixels in \a in by its average.
 /// Write the result in \a average.
-/// Warning: image \a im is padded by 1 pixel each side. **TODO**
+/// Warning: image \a im is padded by 1 pixel each side.
 void projectionPU(const float*  in, int w, int h, int z,
                   float* temp, float* average) {
     float norm = 1.0f/float(z*z);
@@ -146,7 +146,6 @@ void derivatives(const float a0[3], const float a1[3], const float a2[3],
 /// Warning: image \a im is padded by 1 pixel each side.
 void compute_derivatives(const float* im, int w, int h,
                          float* grad, float* evolxixi, float* evolnn) {
-    // Inside
     const int w2 = w+2;
 #ifdef _OPENMP
 #pragma omp parallel for
