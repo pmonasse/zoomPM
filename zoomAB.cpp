@@ -4,22 +4,8 @@
  * @brief Super-resolution with Perona-Malik diffusion (Belahmidi's algorithm)
  * 
  * Copyright (c) 2004 Abdelmounim Belahmidi
- * Copyright (c) 2023 Pascal Monasse
- * All rights reserved.
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU Lesser General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU Lesser General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
- */
+ * Copyright (c) 2023-2024 Pascal Monasse
+*/
 
 #include "cmdLine.h"
 #include "io_png.h"
@@ -52,7 +38,8 @@ bool all_gray(const float* data, int w, int h) {
     return true;
 }
 
-const float minGrad=0.001f; ///< Minimum gradient norm for applying anisotropy
+const float GAMMA_CAUCHY=0.1f;
+const float minGrad=1e-2/GAMMA_CAUCHY; ///< Min square grad norm for anisotropy
 const float dt = 0.1f; ///< Time step for diffusion
 
 /// Clamp \a f in interval [0,255].
@@ -107,40 +94,38 @@ void projectionPU(const float*  in, int w, int h, int z,
     zoom_duplication(temp,w,h, z, average);
 }
 
+/// Compute derivatives for 3x3 local patch with rows a0, a1, and a2.
+/// g2 is the squared norm of gradient, d1 the scaled curvature and d2 the
+/// difference between Laplacian and d1.
 void derivatives(const float a0[3], const float a1[3], const float a2[3],
-                 float& grad, float& g, float& h) {
-    const float sqrt12=M_SQRT1_2; // 1/sqrt(2)
-    const float sqrt18=sqrt12/2;  // 1/sqrt(8)=1/(2 sqrt(2))
-    const float c2=4.0*sqrt12+4.0;
-    float c= a2[2] - a0[0];
-    float d= a2[0] - a0[2];
-    float ax= a1[2] - a1[0] + sqrt18*(c-d);
-    float ay= a2[1] - a0[1] + sqrt18*(c+d);
-    float az=ax*ay;
-    ax *= ax;
-    ay *= ay;
-    grad = ax+ay;
-    if(grad < ::minGrad) {
-        h = g = ((a0[0]+a0[2]+a2[0]+a2[2])*sqrt12 +
-                 (a0[1]+a1[0]+a1[2]+a2[1]) - c2*a1[1])/c2;
+                 float& g2, float& d1, float& d2) {
+    const float C = 0.3f;
+    const float norm = 1/(2*(1+2*C));
+    float ux = ((a0[2]-a0[0]+a2[2]-a2[0])*C + (a1[2]-a1[0]))*norm;
+    float uy = ((a2[0]-a0[0]+a2[2]-a0[2])*C + (a2[1]-a0[1]))*norm;
+    g2 = ux*ux+uy*uy;
+    if(g2 < ::minGrad) { // Small gradient -> switch to Laplacian
+        const float c = M_SQRT1_2, c2 = 4*(c+1);
+        d1 = d2 = ((a0[0]+a0[2]+a2[0]+a2[2])*c +
+                   (a0[1]+a1[0]+a1[2]+a2[1])   - c2*a1[1])/c2;
         return;
     }
-    float li=1.0/grad;
-    az*=li;
-    ax*=li;
-    ay*=li;  
-    li=az*az;
-    float l0=-2.0+4.0*li;
-    float l1=ay*(ay-ax);
-    float l2=ax*(ax-ay);
-    float l3=li-.5*az;
-    float l4=l3+az;
-    g = l0*a1[1] +
-        l1*(a1[0]+a1[2]) + l2*(a0[1]+a2[1]) +
-        l3*(a2[2]+a0[0]) + l4*(a0[2]+a2[0]); 
-    h = l0*a1[1] +
-        l2*(a1[0]+a1[2]) + l1*(a0[1]+a2[1]) +
-        l4*(a2[2]+a0[0]) + l3*(a0[2]+a2[0]); 
+
+    // Choices of k00 for curvature computation. Select one, comment the others.
+    //float k00 = 0.5*g2; // Sapiro-Tannenbaum
+    //float k00 = 0.25*g2; // Alvarez
+    float k00 = 0.5*g2-ux*ux*uy*uy/g2; // Alvarez-Morel
+    //float k00 = (g2-fabs(ux*uy)+fmax(ux*ux,uy*uy))/4; // Cohignac et al.
+    //float k00 = (g2-fabs(ux*uy)+2*fmax(ux*ux,uy*uy))/6; // Monasse
+
+    float l1 = 2*k00-uy*uy;
+    float l2 = 2*k00-ux*ux;
+    float l3 = -k00+(g2+ux*uy)/2;
+    float l4 = -k00+(g2-ux*uy)/2;
+    d1 = ((a0[1]+a2[1])*l1 + (a1[2]+a1[0])*l2 +
+          (a0[2]+a2[0])*l3 + (a2[2]+a0[0])*l4 - 4*k00*a1[1])/g2;
+    d2 = ((a0[1]+a2[1])*l2 + (a1[2]+a1[0])*l1 +
+          (a0[2]+a2[0])*l4 + (a2[2]+a0[0])*l3 - 4*k00*a1[1])/g2;
 }
 
 /// Warning: image \a im is padded by 1 pixel each side.
@@ -194,7 +179,7 @@ void zoomAB(const float* lr, int w, int h, int z, float* hr) {
                 int i=y*zw+x;
                 float reac = average[i] - dup[i];
                 float evolx = uxixi[i];
-                float evoln = unn[i] / (1.0f + 0.01f * grad[i]);
+                float evoln = unn[i] / (1 + GAMMA_CAUCHY * grad[i]);
                 hrpad[(y+1)*(zw+2)+(x+1)] += ::dt*(evolx + evoln - reac);
                 clamp(hrpad[(y+1)*(zw+2)+(x+1)]);
             }
