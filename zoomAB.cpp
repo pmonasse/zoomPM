@@ -105,9 +105,10 @@ void derivatives(const float a0[3], const float a1[3], const float a2[3],
     float uy = ((a2[0]-a0[0]+a2[2]-a0[2])*C + (a2[1]-a0[1]))*norm;
     g2 = ux*ux+uy*uy;
     if(g2 < ::minGrad) { // Small gradient -> switch to Laplacian
-        const float c = M_SQRT1_2, c2 = 4*(c+1);
-        d1 = d2 = ((a0[0]+a0[2]+a2[0]+a2[2])*c +
-                   (a0[1]+a1[0]+a1[2]+a2[1])   - c2*a1[1])/c2;
+        // const float c = M_SQRT1_2, c2 = 4*(c+1);
+        // d1 = d2 = ((a0[0]+a0[2]+a2[0]+a2[2])*c +
+        //            (a0[1]+a1[0]+a1[2]+a2[1])   - c2*a1[1])/c2;
+        d1 = d2 = (a0[0]+a0[2]+a2[0]+a2[2])*0.25 - a1[1];
         return;
     }
 
