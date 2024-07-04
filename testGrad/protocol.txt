@@ -1,0 +1,46 @@
+# Error gradient: modulus/angle
+
+## data gathering
+$ for i in $(seq 0 9); do ./testGrad 0.$i |grep Mod >> modulus.txt; done
+$ for i in $(seq 0 9); do ./testGrad 0.$i |grep Angle >> angle.txt; done
+
+## Cleaning
+clean modulus.txt and angle.txt.
+
+## Insert x
+insert 0, 0.1, ..., 0.9 in front of lines
+
+## Gnuplot
+plot [-0.1:1] "modulus.txt" using 1:2:3 with errorbars title "modulus"
+plot [-0.1:1] "angle.txt" using 1:2:3 with errorbars title "angle"
+
+# Choice of k00 for curvature
+
+## gnuplot
+min(x,y) = x<y? x:y
+max(x,y) = x<y? y:x
+#  Sapiro-Tannenbaum
+set term qt 0
+k00(x)=0.5
+plot [0:pi/4] 2*k00(x) - max(cos(x)**2,sin(x)**2) title "min(k10,k01)"
+replot -k00(x)+(1-abs(cos(x)*sin(x)))/2 title "min(diag)"
+# Alvarez-Morel
+set term qt 1
+k00(x) = 0.5-cos(x)**2*sin(x)**2
+plot [0:pi/4] 2*k00(x) - max(cos(x)**2,sin(x)**2) title "min(k10,k01)"
+replot -k00(x)+(1-abs(cos(x)*sin(x)))/2 title "min(diag)"
+# Cohignac et al.
+set term qt 2
+k00(x) = (1-abs(cos(x)*sin(x))+max(cos(x)**2,sin(x)**2))/4
+plot [0:pi/4] 2*k00(x) - max(cos(x)**2,sin(x)**2) title "min(k10,k01)"
+replot -k00(x)+(1-abs(cos(x)*sin(x)))/2 title "min(diag)"
+# Alvarez
+set term qt 3
+k00(x)=0.5
+plot [0:pi/4] 2*k00(x) - max(cos(x)**2,sin(x)**2) title "min(k10,k01)"
+replot -k00(x)+(1-abs(cos(x)*sin(x)))/2 title "min(diag)"
+# Monasse
+set term qt 4
+k00(x) = (1-abs(cos(x)*sin(x))+2*max(cos(x)**2,sin(x)**2))/6
+plot [0:pi/4] 2*k00(x) - max(cos(x)**2,sin(x)**2) title "min(k10,k01)=min(diag)"
+
