@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 /**
- * @file zoomAB.cpp
+ * @file zoomPM.cpp
  * @brief Super-resolution with Perona-Malik diffusion (Belahmidi's algorithm)
  * 
  * Copyright (c) 2004 Abdelmounim Belahmidi
@@ -147,7 +147,8 @@ void compute_derivatives(const float* im, int w, int h,
 }
 
 /// Zoom of low-res image \a lr into high-res image \a hr.
-void zoomAB(const float* lr, int w, int h, int z, float* hr) {
+/// Perona-Malik diffusion with a reaction term.
+void zoomPM(const float* lr, int w, int h, int z, int iter, float* hr) {
     const int zw=z*w, zh=z*h;
     const int iSizeImageZoom = zw*zh;
     float* temp = new float[w*h];
@@ -158,16 +159,13 @@ void zoomAB(const float* lr, int w, int h, int z, float* hr) {
     float* average = new float[iSizeImageZoom];
     float* hrpad   = new float[iSizeImageZoom+2*(zw+zh+2)]; // Pad=1 each side
 
-    const int n_iter = int(z*z/::dt+0.5f);
-    std::cout << "Iterations: " << n_iter << "." << std::endl;
-
     // Generate dup, the 0-order spline interpolation of the input image
     zoom_duplication(lr,w,h, z, dup);
     // Copy it as initial zoomed image in padded image hrpad
     for(int i=0; i<zh; i++)
         memcpy(hrpad+(i+1)*(zw+2)+1, dup+i*zw, zw*sizeof(float));
 
-    for(int k=0; k<n_iter; k++) {
+    for(int k=0; k<iter; k++) {
         fill_padding(hrpad, zw, zh);
         compute_derivatives(hrpad,zw,zh, grad, uxixi, unn);
         projectionPU(hrpad,w,h, z, temp, average);
@@ -203,8 +201,10 @@ int main(int argc, char* argv[]) {
     CmdLine cmd;
     bool bColor=false;
     unsigned int z=2; // Max number of pixels to discard
+    unsigned int iter=0; // Number of iterations, 0=automatic
     cmd.add( make_option('z',z).doc("Integer zoom factor") );
     cmd.add( make_option('c',bColor,"color").doc("Handle color image") );
+    cmd.add( make_option('n',iter,"iter").doc("Nb of iterations (0=auto)"));
 
     try {
         cmd.process(argc, argv);
@@ -237,13 +237,15 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
+    if(iter==0) {
+        iter = int(z*z/::dt+0.5f);
+        std::cout << "Iterations: " << iter << "." << std::endl;
+    }
+
     float* out = new float[channels*z*z*w*h];
     Timer T;
-    for(int i=0; i<channels; i++) {
-        if(channels>1)
-            std::cout << "Channel " << i << ". " << std::flush;
-        zoomAB(data+w*h*i, (int)w, (int)h, (int)z, out+z*z*w*h*i);
-    }
+    for(int i=0; i<channels; i++)
+        zoomPM(data+w*h*i, (int)w, (int)h, (int)z, iter, out+z*z*w*h*i);
     T.time();
     if(io_png_write_f32(argv[2], out, z*w, z*h, channels) != 0) {
         std::cerr << "Error writing image file " << argv[2] << std::endl;
