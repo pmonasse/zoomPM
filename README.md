@@ -1,13 +1,15 @@
 # ZoomPM - Super resolution with Perona Malik Diffusion
 
-Version 0.9, 07/04/2024
+Version 0.9, 07/04/2024.
+
+Future versions: <https://github.com/pmonasse/zoomPM>
 
 ## Authors
 - Abdelmounim Belahmidi <abelahmidi@lerity-alcen.com>
 - Pascal Monasse <pascal.monasse@enpc.fr>
 
 ## Licensing
-See LICENSE file
+GPL-3.0. See LICENSE file.
 
 ## Build
 The build procedure is handled by CMake (https://cmake.org/).
