@@ -11,10 +11,10 @@ RUN pip3 install --no-cache-dir -r requirements.txt && rm requirements.txt
 
 # copy the code to $bin
 ENV bin /workdir/bin/
-RUN mkdir -p $bin && mkdir build && cd build && \
-    cmake -DCMAKE_BUILD_TYPE=Release .. && make -j2
+RUN mkdir -p $bin
 WORKDIR $bin
 COPY . .
+RUN mkdir build && cd build && cmake -DCMAKE_BUILD_TYPE=Release .. && make -j2
 
 # the execution will happen in the folder /workdir/exec
 # it will be created by IPOL
